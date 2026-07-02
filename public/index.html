@@ -153,6 +153,8 @@ tr.destaque td:first-child::before{content:"▶ ";color:var(--accent);font-size:
 <nav class="tabs">
   <div class="tab active" onclick="trocarAba('classificacao', this)">Classificação</div>
   <div class="tab" onclick="trocarAba('jogos', this)">Jogos / Rodadas</div>
+  <div class="tab" onclick="trocarAba('ranking', this)">Ranking Geral</div>
+  <div class="tab" onclick="trocarAba('quartos', this)">Ranking 4ºs</div>
   <div class="tab" onclick="trocarAba('matamata', this)">Previsão 2ª Fase</div>
 </nav>
 
@@ -178,6 +180,14 @@ tr.destaque td:first-child::before{content:"▶ ";color:var(--accent);font-size:
     <div id="jogos-content">
       <div class="loading"><div class="spinner"></div>Buscando jogos...</div>
     </div>
+  </div>
+
+  <div id="aba-ranking" style="display:none">
+    <div id="ranking-content"><div class="loading"><div class="spinner"></div>Aguardando dados...</div></div>
+  </div>
+
+  <div id="aba-quartos" style="display:none">
+    <div id="quartos-content"><div class="loading"><div class="spinner"></div>Aguardando dados...</div></div>
   </div>
 
   <div id="aba-matamata" style="display:none">
@@ -435,9 +445,13 @@ function trocarAba(aba, el) {
   document.querySelectorAll('.tab').forEach(function(t){ t.classList.remove('active'); });
   el.classList.add('active');
   document.getElementById('aba-classificacao').style.display = aba==='classificacao' ? '' : 'none';
-  document.getElementById('aba-jogos').style.display      = aba==='jogos'           ? '' : 'none';
-  document.getElementById('aba-matamata').style.display   = aba==='matamata'        ? '' : 'none';
+  document.getElementById('aba-jogos').style.display        = aba==='jogos'          ? '' : 'none';
+  document.getElementById('aba-ranking').style.display      = aba==='ranking'        ? '' : 'none';
+  document.getElementById('aba-quartos').style.display      = aba==='quartos'        ? '' : 'none';
+  document.getElementById('aba-matamata').style.display     = aba==='matamata'       ? '' : 'none';
   if (aba === 'matamata' && grupos.length) renderMataMata();
+  if (aba === 'ranking'  && grupos.length) renderRanking();
+  if (aba === 'quartos'  && grupos.length) renderQuartos();
   if (aba === 'jogos') {
     setupBuscaJogos();
     if (!dadosJogos) {
@@ -749,6 +763,168 @@ async function carregar() {
       '<button onclick="location.reload()" style="margin-top:8px;padding:8px 20px;border-radius:8px;border:1px solid #ccc;cursor:pointer;font-size:14px">Tentar novamente</button></div>';
     document.getElementById('titulo').textContent = 'Erro ao carregar';
   }
+}
+
+/* ─── RANKING GERAL ─── */
+function renderRanking() {
+  const app = document.getElementById('ranking-content');
+  if (!grupos.length) { app.innerHTML = '<div class="loading"><div class="spinner"></div>Aguardando dados...</div>'; return; }
+
+  const top2ids = getTop2dos4os().map(t => t.IdClube);
+  const upd = grupos[0]?.times[0]?.UltimaSincronizacao?.replace('T',' ').slice(0,16) || '';
+
+  // Todos os times de todos os grupos ordenados
+  const todos = grupos.flatMap(g => g.times.map(t => ({ ...t, grupo: g.nome })));
+  todos.sort((a,b) => b.Pontos-a.Pontos || b.Vitorias-a.Vitorias || b.SaldoGols-a.SaldoGols || b.GolsPro-a.GolsPro);
+
+  let html = `<div class="rank-intro">
+    Classificação geral de todos os times somando pontos, vitórias, saldo de gols e gols pró.
+    Os 3 primeiros de cada grupo e os 2 melhores 4ºs colocados avançam para a 2ª fase.
+  </div>`;
+
+  html += '<div class="rank-table-wrap"><table><thead><tr>';
+  html += '<th style="width:36px">#</th><th style="text-align:left;min-width:160px">Time</th><th>Grupo</th>';
+  html += '<th title="Pontos">P</th><th title="Jogos">J</th><th title="Vitórias">V</th><th title="Empates">E</th><th title="Derrotas">D</th>';
+  html += '<th title="Gols Pró">GP</th><th title="Gols Contra">GC</th><th title="Saldo">SG</th>';
+  html += '<th title="Vitórias Pênalti">VP</th></tr></thead><tbody>';
+
+  let lastPts = -1, lastGroup = '';
+  todos.forEach((t, i) => {
+    const rank = i + 1;
+    const pos = t.Classificacao;
+    const isClassif = pos <= 3;
+    const is4thTop2 = pos === 4 && top2ids.includes(t.IdClube);
+    const is4thOut  = pos === 4 && !top2ids.includes(t.IdClube);
+
+    // Separador de zona
+    if (i === 0 && rank === 1) {
+      html += `<tr><td colspan="12" class="rank-sep">🟢 Zona de classificação direta (1ºs–3ºs)</td></tr>`;
+    }
+    const firstNonClassif = !isClassif && todos[i-1]?.Classificacao <= 3;
+    const firstTop2 = is4thTop2 && !todos[i-1]?.IdClube || (is4thTop2 && todos.slice(0,i).every(x => x.Classificacao <= 3));
+    const firstOut = is4thOut && todos[i-1] && top2ids.includes(todos[i-1].IdClube);
+    const firstElim = pos > 4 && todos[i-1]?.Classificacao <= 4;
+
+    if (firstNonClassif && !is4thTop2 && !is4thOut) html += `<tr><td colspan="12" class="rank-sep">🟡 Fora da zona de classificação</td></tr>`;
+
+    // Badge de posição
+    let badge = '';
+    if (rank === 1) badge = 'rp-gold';
+    else if (rank === 2) badge = 'rp-silver';
+    else if (rank === 3) badge = 'rp-bronze';
+    else if (isClassif) badge = 'rp-classif';
+    else if (is4thTop2) badge = 'rp-top2';
+    else if (is4thOut) badge = 'rp-out';
+    else badge = 'rp-normal';
+
+    // Cor de fundo da linha
+    let rowBg = '';
+    if (isClassif) rowBg = i < 3 ? ['background:rgba(212,175,55,.08)','background:rgba(150,150,150,.07)','background:rgba(176,101,43,.08)'][i] : 'background:rgba(15,110,86,.06)';
+    else if (is4thTop2) rowBg = 'background:rgba(24,95,165,.07)';
+    else if (is4thOut) rowBg = 'background:rgba(186,117,23,.05)';
+
+    const esc = getEscudo(t.NomePopularClube);
+    const escImg = esc ? `<img src="${esc}" style="width:18px;height:18px;object-fit:contain;margin-right:5px;vertical-align:middle;border-radius:2px" onerror="this.style.display='none'" alt="">` : '';
+
+    html += `<tr style="${rowBg}border-top:0.5px solid var(--borda)">
+      <td style="text-align:center"><span class="rank-pos-badge ${badge}">${rank}</span></td>
+      <td style="text-align:left;font-weight:600">${escImg}${t.NomePopularClube}</td>
+      <td style="font-size:11px;color:var(--muted)">${t.grupo}</td>
+      <td><strong>${t.Pontos}</strong></td>
+      <td>${t.NumeroPartidas}</td>
+      <td>${t.Vitorias}</td><td>${t.Empates}</td><td>${t.Derrota}</td>
+      <td>${t.GolsPro}</td><td>${t.GolsContra}</td><td>${sg(t.SaldoGols)}</td>
+      <td>${t.VitoriasPenaltis}</td>
+    </tr>`;
+  });
+
+  html += '</tbody></table></div>';
+
+  // Legenda
+  html += `<div class="legend" style="margin-top:.75rem">
+    <div class="legend-item"><span class="rank-pos-badge rp-classif" style="width:14px;height:14px;font-size:9px"> </span>1º–3º de cada grupo: classificado</div>
+    <div class="legend-item"><span class="rank-pos-badge rp-top2" style="width:14px;height:14px;font-size:9px"> </span>4º (top 2): classificado</div>
+    <div class="legend-item"><span class="rank-pos-badge rp-out" style="width:14px;height:14px;font-size:9px"> </span>4º (fora do top 2)</div>
+  </div>`;
+
+  html += `<div class="footer-note">Fonte: FPF · Última atualização: ${upd}</div>`;
+  app.innerHTML = html;
+}
+
+/* ─── RANKING DOS 4ºS ─── */
+function renderQuartos() {
+  const app = document.getElementById('quartos-content');
+  if (!grupos.length) { app.innerHTML = '<div class="loading"><div class="spinner"></div>Aguardando dados...</div>'; return; }
+
+  const upd = grupos[0]?.times[0]?.UltimaSincronizacao?.replace('T',' ').slice(0,16) || '';
+
+  // Pegar o 4º de cada grupo
+  const quartos = grupos
+    .filter(g => g.times.length >= 4)
+    .map(g => ({ ...g.times[3], grupo: g.nome }))
+    .sort((a,b) => b.Pontos-a.Pontos || b.Vitorias-a.Vitorias || b.SaldoGols-a.SaldoGols || b.GolsPro-a.GolsPro);
+
+  const totalGrupos = quartos.length;
+
+  let html = `<div class="rank-intro">
+    Disputa pelos <strong>2 melhores 4ºs colocados</strong> entre todos os grupos.
+    Os 2 primeiros desta lista ganham uma vaga extra na 2ª fase.
+    O critério de desempate segue o regulamento da FPF: Pontos → Vitórias → Saldo de Gols → Gols Pró.
+  </div>`;
+
+  quartos.forEach((t, i) => {
+    const rank = i + 1;
+    const isTop2 = rank <= 2;
+    const isNext = rank === 3;
+
+    let badge = isTop2 ? 'rp-top2' : (isNext ? 'rp-out' : 'rp-normal');
+    const esc = getEscudo(t.NomePopularClube);
+    const escImg = esc ? `<img src="${esc}" style="width:28px;height:28px;object-fit:contain;border-radius:4px" onerror="this.style.display='none'" alt="">` : '';
+
+    const ptsProximo = quartos[rank] ? quartos[rank-1].Pontos - quartos[rank].Pontos : null;
+    const difText = isTop2 && quartos[rank]
+      ? `<span style="color:var(--verde);font-size:11px">+${quartos[rank-1].Pontos - quartos[rank].Pontos}pts à frente do ${rank+1}º</span>`
+      : !isTop2 && quartos[i-1]
+      ? `<span style="color:var(--red);font-size:11px">-${quartos[i-1].Pontos - t.Pontos}pts do ${i}º</span>`
+      : '';
+
+    // Separador entre top2 e fora
+    if (rank === 3) {
+      html += `<div style="display:flex;align-items:center;gap:10px;margin:1rem 0 .75rem">
+        <div style="flex:1;height:2px;background:var(--borda)"></div>
+        <span style="font-size:11px;font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:.05em">Fora da zona — ${totalGrupos - 2} times eliminados</span>
+        <div style="flex:1;height:2px;background:var(--borda)"></div>
+      </div>`;
+    }
+
+    html += `<div class="quarto-card ${isTop2 ? 'q-top' : ''}">
+      <div class="quarto-header">
+        <span>${t.grupo}</span>
+        <span>${isTop2 ? '✅ Classificado para a 2ª fase' : isNext ? '⚠️ Próximo na fila' : '❌ Eliminado'}</span>
+      </div>
+      <div class="quarto-body">
+        <div class="quarto-rank"><span class="rank-pos-badge ${badge}" style="width:34px;height:34px;font-size:15px">${rank}</span></div>
+        ${escImg}
+        <div class="quarto-info">
+          <div class="quarto-nome">${t.NomePopularClube}</div>
+          <div class="quarto-grupo">4º colocado do ${t.grupo} ${difText}</div>
+        </div>
+        <div class="quarto-pts">
+          <div style="font-size:24px;font-weight:800;color:var(--accent)">${t.Pontos}</div>
+          <div style="font-size:10px;color:var(--muted);text-align:right">pontos</div>
+        </div>
+      </div>
+      <div class="quarto-stats">
+        <span>⚽ ${t.Vitorias}V ${t.Empates}E ${t.Derrota}D</span>
+        <span>🎯 ${t.GolsPro} gols pró</span>
+        <span>📊 Saldo ${sg(t.SaldoGols)}</span>
+        <span>🟨 ${t.CartoesAmarelos} CA · 🟥 ${t.CartoesVermelhos} CV</span>
+      </div>
+    </div>`;
+  });
+
+  html += `<div class="footer-note">Fonte: FPF · Última atualização: ${upd}</div>`;
+  app.innerHTML = html;
 }
 
 carregar();
